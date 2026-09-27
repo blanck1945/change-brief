@@ -68,3 +68,4 @@ pnpm preview:all
 - PR workflow uses **fixture content**, not your diff or Jira yet (F1 generate / F2 productization).
 - Check Runs API is planned; today only the **PR comment** is posted.
 - Default demo source is Jira mock; set `CHANGE_BRIEF_DEMO_SOURCE=spec` in the workflow to use the spec fixture.
+
