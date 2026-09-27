@@ -1,0 +1,29 @@
+{
+  "id": "billing-downgrade-v2",
+  "title": "Self-service plan downgrade with proration",
+  "specPath": "docs/specs/billing-downgrade-v2.md",
+  "specRevision": "a1b2c3d",
+  "url": "https://github.com/example/billing-api/blob/a1b2c3d/docs/specs/billing-downgrade-v2.md",
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "section": "§3.1",
+      "text": "MUST expose self-service API for Pro → Starter downgrade"
+    },
+    {
+      "id": "REQ-2",
+      "section": "§3.2",
+      "text": "MUST compute prorated credit for unused billing period"
+    },
+    {
+      "id": "REQ-3",
+      "section": "§3.3",
+      "text": "MUST apply downgrade only at cycle boundary"
+    },
+    {
+      "id": "REQ-4",
+      "section": "§5",
+      "text": "SHOULD provide portal UI with credit preview (may ship separately)"
+    }
+  ]
+}

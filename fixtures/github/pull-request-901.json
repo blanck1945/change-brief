@@ -1,0 +1,10 @@
+{
+  "repo": "billing-api",
+  "number": 901,
+  "url": "https://github.com/example/billing-api/pull/901",
+  "title": "Spec billing-downgrade-v2: backend implementation",
+  "body": "Implements docs/specs/billing-downgrade-v2.md (revision a1b2c3d). Portal UI deferred.",
+  "baseSha": "a1b2c3d",
+  "headSha": "c0ffee1",
+  "labels": ["spec:billing-downgrade-v2"]
+}

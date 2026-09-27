@@ -1,0 +1,251 @@
+{
+  "version": "0.4",
+  "status": "ready_for_human",
+  "generatedAt": "2026-09-24T04:00:00.000Z",
+  "chronicleSource": "synthetic",
+  "workSource": {
+    "kind": "jira",
+    "ref": "PROJ-1234",
+    "title": "Allow plan downgrade with proration",
+    "url": "https://jira.example/browse/PROJ-1234"
+  },
+  "mergeRequest": {
+    "repo": "billing-api",
+    "number": 842,
+    "url": "https://github.com/example/billing-api/pull/842",
+    "baseSha": "a1b2c3d",
+    "headSha": "f4e5d6c"
+  },
+  "oneLiner": "Pro users can downgrade to Starter via self-service; the system computes prorated credit and schedules the change at billing cycle end.",
+  "requirementSummary": "PROJ-1234 asks for self-service downgrade from Pro to Starter with prorated account credit applied at the end of the current billing cycle—not immediate plan swap or portal UI in this release.",
+  "integration": {
+    "summary": "Public API accepts downgrade requests, persists scheduled changes in Postgres, and an hourly worker applies them at cycle boundary; Stripe is read-only for subscription identity until the job runs; confirmation email uses the existing queue.",
+    "mermaid": "flowchart LR\n  subgraph clients\n    APIClient[API clients / future portal]\n  end\n  subgraph billing-api\n    API[POST /v1/subscriptions/downgrade]\n    DB[(subscription_scheduled_changes)]\n    Job[apply-scheduled-downgrades]\n  end\n  Stripe[(Stripe read-only)]\n  Queue[Email queue]\n  APIClient --> API\n  API --> DB\n  Job --> DB\n  Job --> Stripe\n  Job --> Queue",
+    "mermaidSequence": "sequenceDiagram\n  actor User as Pro tenant\n  participant API as billing-api\n  participant DB as Postgres\n  participant Job as billing-jobs\n  User->>API: POST downgrade + idempotency key\n  API->>DB: insert row status=scheduled\n  API-->>User: 202 pending_downgrade + credit preview\n  Note over Job,DB: After effective_at (cycle end)\n  Job->>DB: fetch due rows\n  Job->>API: apply plan Starter\n  Job->>DB: mark applied\n  Job-->>User: confirmation email (once)",
+    "touchpoints": [
+      { "from": "API clients", "to": "POST /v1/subscriptions/downgrade", "protocol": "HTTPS", "notes": "Idempotency key required" },
+      { "from": "billing-jobs worker", "to": "Postgres", "protocol": "SQL", "notes": "effective_at index" },
+      { "from": "billing-jobs worker", "to": "Stripe", "protocol": "API", "notes": "Read subscription only" },
+      { "from": "billing-jobs worker", "to": "Email queue", "protocol": "internal", "notes": "Dedupe on retry" }
+    ]
+  },
+  "agentConsiderations": [
+    {
+      "question": "Use Stripe Schedule vs internal scheduling?",
+      "resolution": "Internal table owns effective date because ledger credit is not modeled in Stripe Schedule."
+    },
+    {
+      "question": "Ship portal UI in same MR as API?",
+      "resolution": "No—frontend capacity; AC4 deferred to PROJ-1290 with flag off until portal ready."
+    },
+    {
+      "question": "Timezone for cycle end?",
+      "resolution": "Document UTC in API; human checklist flags product confirmation."
+    }
+  ],
+  "worthMentioning": [
+    "Portal UI (AC4) is explicitly out of this MR—acceptable if PROJ-1290 is tracked.",
+    "Feature flag `billing.downgrade_self_service` stays off in prod until portal ships.",
+    "Migration must run before API deploy; worker can follow in a second deploy."
+  ],
+  "humanValidation": {
+    "headline": "You do not need to read every file—confirm the story matches AC1–AC3 and that AC4 deferral is acceptable for your release.",
+    "correctSignals": [
+      "POST downgrade returns pending state and a credit amount tied to remaining cycle days—not an immediate Stripe plan change.",
+      "Row in `subscription_scheduled_changes` with `effective_at` at cycle boundary; worker applies only after that timestamp.",
+      "Repeat POST with same idempotency key does not double credit or create duplicate schedules.",
+      "OpenAPI documents UTC for cycle end; tests cover proration edge at month boundary."
+    ],
+    "redFlags": [
+      "Stripe subscription price changes on API call instead of at job run.",
+      "No migration or index on `effective_at` while worker scans full table.",
+      "AC4 marked met without a tracked follow-up ticket.",
+      "Feature flag default `true` in production config."
+    ],
+    "quickChecks": [
+      {
+        "action": "Call downgrade on staging Pro subscription mid-cycle",
+        "passIf": "202 + pending_downgrade; Stripe plan still Pro until job runs"
+      },
+      {
+        "action": "Advance clock / seed row with effective_at in past; run job once",
+        "passIf": "Plan becomes Starter; single confirmation email"
+      },
+      {
+        "action": "Replay same idempotency key",
+        "passIf": "Same response body; one schedule row"
+      },
+      {
+        "action": "Scan MR traceability vs PROJ-1234 AC list",
+        "passIf": "AC1–AC3 met with behavioral evidence; AC4 not_met with PROJ-1290 link"
+      }
+    ]
+  },
+  "planBaseline": [
+    "Downgrade Pro → Starter via self-service API",
+    "Proration as internal account credit",
+    "Effective at billing cycle end",
+    "Portal UI out of this MR (PROJ-1290)"
+  ],
+  "implementationChronicle": [
+    {
+      "seq": 1,
+      "type": "plan",
+      "whatHappened": "Ticket and spec aligned on hourly job + scheduled table",
+      "decisionOrConsequence": "Do not use Stripe Schedule as effective-date source of truth"
+    },
+    {
+      "seq": 2,
+      "type": "discovery",
+      "whatHappened": "Stripe Schedule does not model internal ledger credit",
+      "decisionOrConsequence": "Table `subscription_scheduled_changes` owns effective date"
+    },
+    {
+      "seq": 3,
+      "type": "decision",
+      "whatHappened": "Feature flag off by default in prod",
+      "decisionOrConsequence": "Ops enables `billing.downgrade_self_service` after portal ships"
+    }
+  ],
+  "deviations": [
+    {
+      "expected": "AC4 portal UI in same release",
+      "actual": "API + worker only; UI in PROJ-1290",
+      "reason": "Frontend capacity not available this sprint",
+      "acceptableForMerge": true
+    }
+  ],
+  "globalView": [
+    {
+      "capabilityOrLayer": "Billing / public API",
+      "roleInMr": "Downgrade endpoint + OpenAPI",
+      "notes": "Idempotency key documented"
+    },
+    {
+      "capabilityOrLayer": "Jobs / billing-jobs",
+      "roleInMr": "Applies scheduled downgrades",
+      "notes": "Email consumer dedupe"
+    },
+    {
+      "capabilityOrLayer": "Data",
+      "roleInMr": "Migration + effective_at index",
+      "notes": ""
+    }
+  ],
+  "anchorPoints": [
+    "POST /v1/subscriptions/downgrade",
+    "migrations/20260326_subscription_scheduled_changes.sql"
+  ],
+  "scope": {
+    "areas": [
+      {
+        "name": "API `subscriptions`",
+        "summary": "New `POST /v1/subscriptions/downgrade` with eligibility checks"
+      },
+      {
+        "name": "Worker `billing-jobs`",
+        "summary": "Job `apply-scheduled-downgrades` runs hourly"
+      },
+      {
+        "name": "DB",
+        "summary": "Table `subscription_scheduled_changes` + index on `effective_at`"
+      },
+      {
+        "name": "Admin UI",
+        "summary": "No changes (public API documented in OpenAPI only)"
+      }
+    ],
+    "inScope": [
+      "Pro → Starter downgrade",
+      "proration as account credit",
+      "confirmation email via existing queue"
+    ],
+    "outOfScope": [
+      "upgrades",
+      "immediate cancellation",
+      "currency changes"
+    ],
+    "followUp": ["PROJ-1290 (show credit in UI)"]
+  },
+  "requirementsTraceability": [
+    {
+      "criterion": "Pro user can request downgrade",
+      "sourceRef": "AC1",
+      "status": "met",
+      "evidence": "Endpoint validates current plan and creates scheduled row"
+    },
+    {
+      "criterion": "Prorated credit",
+      "sourceRef": "AC2",
+      "status": "met",
+      "evidence": "`ProrationService` uses remaining days in cycle"
+    },
+    {
+      "criterion": "Effective at cycle end",
+      "sourceRef": "AC3",
+      "status": "met",
+      "evidence": "Worker applies only when `effective_at <= now()`"
+    },
+    {
+      "criterion": "Portal UI",
+      "sourceRef": "AC4",
+      "status": "not_met",
+      "evidence": "Explicitly out of scope; frontend ticket open"
+    }
+  ],
+  "behavior": {
+    "before": "Full cancellation only; no partial plan downgrade.",
+    "after": "Idempotent request by `subscription_id`; API returns interim `pending_downgrade` state.",
+    "featureFlags": [
+      {
+        "name": "billing.downgrade_self_service",
+        "default": "false",
+        "notes": "ops enables per environment"
+      }
+    ]
+  },
+  "blastRadius": {
+    "usersRoles": "Pro plan tenants; Starter users unaffected.",
+    "data": "Writes new table; reads `invoices` and `subscription_periods`.",
+    "integrations": "Stripe read-only subscription id; no price change until job runs.",
+    "deployNotes": "Run migration before API deploy; worker can follow in second deploy."
+  },
+  "multiRepo": {
+    "links": [
+      { "repo": "billing-api", "mr": "#842", "role": "API + migration + job" },
+      { "repo": "billing-portal", "mr": "#119", "role": "(pending) UI" }
+    ],
+    "mergeOrder": "billing-api first with flag off; portal after."
+  },
+  "humanAttention": [
+    "Double downgrade request: confirm idempotency key is documented for API clients.",
+    "Cycle end timezone: confirm with product whether UTC or tenant timezone.",
+    "Duplicate emails on job retry: verify consumer dedupe."
+  ],
+  "deepDives": [
+    {
+      "title": "Why schedule in DB instead of Stripe Schedule",
+      "body": "Stripe Schedules do not cover our internal credit model; effective date lives in our table for ledger reconciliation."
+    }
+  ],
+  "qualityAgentSummary": {
+    "coveredByAgent": [
+      "API parameter injection: no findings.",
+      "Parameterized SQL rules: OK.",
+      "2 minor style notes on tests (non-blocking)."
+    ],
+    "openFindingsCount": 2,
+    "reviewUrl": "https://github.com/example/billing-api/pull/842#pullrequestreview-1"
+  },
+  "humanChecklist": [
+    "Scope matches what I expected from the ticket",
+    "Acceptable to ship AC4 in a follow-up ticket",
+    "Flag off in prod until portal is ready",
+    "Migration tested on staging with representative volume",
+    "Agreed with product: effective date in UTC"
+  ],
+  "confidence": {
+    "overall": "high",
+    "notes": "Example fixture for F0 golden test"
+  }
+}

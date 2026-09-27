@@ -1,0 +1,160 @@
+{
+  "oneLiner": "Backend for spec billing-downgrade-v2: API, scheduled job, and migration; portal UI deferred per §5.",
+  "requirementSummary": "Spec billing-downgrade-v2 §3 requires self-service downgrade API, proration as internal credit, and application at billing cycle end; §5 portal UI is SHOULD and may ship in a sibling MR.",
+  "integration": {
+    "summary": "billing-api exposes downgrade per §3.1; Postgres holds scheduled changes; billing-jobs worker applies at boundary and enqueues confirmation mail. Stripe used read-only for subscription lookup.",
+    "mermaid": "flowchart LR\n  Client[Clients] --> API[billing-api §3.1]\n  API --> DB[(scheduled changes)]\n  Job[billing-jobs §3.3] --> DB\n  Job --> Mail[email queue]",
+    "mermaidSequence": "sequenceDiagram\n  participant Client\n  participant API as billing-api\n  participant DB as Postgres\n  participant Job as billing-jobs\n  participant Mail as email queue\n  Client->>API: POST downgrade\n  API->>DB: insert scheduled change\n  API-->>Client: pending + credit preview\n  Job->>DB: due rows at cycle end\n  Job->>API: apply plan change\n  Job->>Mail: confirmation (once)",
+    "touchpoints": [
+      { "from": "Clients", "to": "billing-api", "protocol": "HTTPS", "notes": "OpenAPI §3.1" },
+      { "from": "billing-jobs", "to": "Postgres", "protocol": "SQL", "notes": "§3.3 scheduler" }
+    ]
+  },
+  "agentConsiderations": [
+    {
+      "question": "Treat §5 portal as blocking for this MR?",
+      "resolution": "No—§5 is SHOULD; backend MR merges with REQ-4 partial and portal tracked separately."
+    },
+    {
+      "question": "Single repo or split billing-portal?",
+      "resolution": "Backend here; portal in MR #119 per spec cross-link."
+    }
+  ],
+  "worthMentioning": [
+    "REQ-4 (portal) marked partial—not a spec violation if §5 is SHOULD.",
+    "Run migration before enabling API in staging.",
+    "Confirm product sign-off on UTC cycle boundary wording in OpenAPI."
+  ],
+  "humanValidation": {
+    "headline": "Match §3 backend obligations; treat §5 portal as optional in this MR if REQ-4 is partial with MR #119 linked.",
+    "correctSignals": [
+      "Downgrade endpoint matches OpenAPI §3.1; proration behavior matches §3.2 narrative in tests or docs.",
+      "Scheduler applies changes only at cycle boundary per §3.3.",
+      "REQ-4 partial cites portal MR #119—not silently marked met."
+    ],
+    "redFlags": [
+      "REQ-1–REQ-3 marked met with only file paths, no behavioral evidence.",
+      "Immediate plan swap contradicting §3.3.",
+      "§5 UI merged into this MR without updating traceability."
+    ],
+    "quickChecks": [
+      {
+        "action": "Compare traceability rows to spec §3 requirement IDs",
+        "passIf": "Each REQ has status + evidence sentence a PM could understand"
+      },
+      {
+        "action": "Staging POST + job run (or integration test output in MR)",
+        "passIf": "Pending until boundary; then Starter + one email"
+      }
+    ]
+  },
+  "planBaseline": [
+    "Implement §3.1–§3.3 in billing-api",
+    "Feature flag off in production until portal ships",
+    "§5 portal work tracked in billing-portal MR #119"
+  ],
+  "implementationChronicle": [
+    {
+      "seq": 1,
+      "type": "plan",
+      "whatHappened": "Spec §3.3 requires cycle boundary; chose internal schedule table",
+      "decisionOrConsequence": "No Stripe Schedule as source of truth"
+    },
+    {
+      "seq": 2,
+      "type": "scope_change",
+      "whatHappened": "§5 UI marked SHOULD — team split backend vs portal MRs",
+      "decisionOrConsequence": "This MR backend-only; traceability notes partial for REQ-4"
+    }
+  ],
+  "deviations": [
+    {
+      "expected": "§5 portal in same release",
+      "actual": "Backend only in MR #901",
+      "reason": "Parallel portal MR not ready",
+      "acceptableForMerge": true
+    }
+  ],
+  "globalView": [
+    {
+      "capabilityOrLayer": "Billing API",
+      "roleInMr": "§3.1 downgrade endpoint",
+      "notes": ""
+    },
+    {
+      "capabilityOrLayer": "Worker",
+      "roleInMr": "§3.3 cycle-boundary application",
+      "notes": ""
+    }
+  ],
+  "anchorPoints": ["docs/specs/billing-downgrade-v2.md", "POST /v1/subscriptions/downgrade"],
+  "scope": {
+    "areas": [
+      {
+        "name": "API",
+        "summary": "Downgrade endpoint per §3.1"
+      },
+      {
+        "name": "Jobs",
+        "summary": "Hourly apply per §3.3"
+      }
+    ],
+    "inScope": ["§3.1", "§3.2", "§3.3"],
+    "outOfScope": ["§5 full portal UX"],
+    "followUp": ["billing-portal#119"]
+  },
+  "requirementsTraceability": [
+    {
+      "sourceRef": "REQ-1",
+      "criterion": "MUST expose self-service API for Pro → Starter downgrade",
+      "status": "met",
+      "evidence": "POST /v1/subscriptions/downgrade with eligibility checks"
+    },
+    {
+      "sourceRef": "REQ-2",
+      "criterion": "MUST compute prorated credit for unused billing period",
+      "status": "met",
+      "evidence": "ProrationService uses remaining days in cycle"
+    },
+    {
+      "sourceRef": "REQ-3",
+      "criterion": "MUST apply downgrade only at cycle boundary",
+      "status": "met",
+      "evidence": "Worker applies when effective_at <= now()"
+    },
+    {
+      "sourceRef": "REQ-4",
+      "criterion": "SHOULD provide portal UI with credit preview (may ship separately)",
+      "status": "partial",
+      "evidence": "API documented; portal MR #119 open — acceptable per spec SHOULD"
+    }
+  ],
+  "behavior": {
+    "before": "No self-service downgrade.",
+    "after": "Scheduled downgrade with pending state on API.",
+    "featureFlags": [
+      {
+        "name": "billing.downgrade_self_service",
+        "default": "false",
+        "notes": ""
+      }
+    ]
+  },
+  "blastRadius": {
+    "usersRoles": "Pro tenants",
+    "data": "New scheduled_changes table",
+    "integrations": "Stripe read-only until job",
+    "deployNotes": "Migration before API"
+  },
+  "humanAttention": ["Confirm §5 partial is acceptable with product"],
+  "qualityAgentSummary": {
+    "coveredByAgent": ["SQL parameterization OK"],
+    "openFindingsCount": 0
+  },
+  "humanChecklist": [
+    "Spec §3.1–§3.3 satisfied",
+    "§5 deferral accepted",
+    "Flag off in prod",
+    "Migration tested on staging"
+  ]
+}

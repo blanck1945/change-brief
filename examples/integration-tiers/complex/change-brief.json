@@ -1,0 +1,241 @@
+{
+  "version": "0.4",
+  "status": "ready_for_human",
+  "generatedAt": "2026-09-27T18:00:00.000Z",
+  "chronicleSource": "baking",
+  "workSource": {
+    "kind": "spec",
+    "ref": "catalog-sync-v3",
+    "title": "Partner catalog ingest and publish",
+    "url": "https://git.example.com/docs/catalog-sync-v3",
+    "specPath": "docs/specs/catalog-sync-v3.md",
+    "specRevision": "rev-9"
+  },
+  "mergeRequest": {
+    "repo": "catalog-api",
+    "number": 501,
+    "url": "https://gitlab.example.com/commerce/catalog-api/-/merge_requests/501",
+    "baseSha": "c0ffee00",
+    "headSha": "deadbeee"
+  },
+  "oneLiner": "Multi-repo catalog sync: ingest partner feeds to S3, normalize in worker, publish events, reconcile inventory across API and search index.",
+  "requirementSummary": "Spec catalog-sync-v3 §2–§6: scheduled + manual ingest, idempotent processing, dead-letter queue, webhook to partners on publish, search index eventual consistency within 5 minutes, feature-flagged rollout.",
+  "integration": {
+    "summary": "catalog-api exposes ingest triggers and read API; catalog-worker pulls from S3, writes Postgres `catalog_items`, emits `catalog.published` to Kafka; catalog-search consumer updates OpenSearch; partner webhooks signed with HMAC; object-store lifecycle for raw feeds.",
+    "mermaid": "flowchart TB\n  subgraph ingress\n    Partner[Partner SFTP/API]\n    API[catalog-api]\n  end\n  subgraph pipeline\n    S3[(S3 raw feeds)]\n    W[catalog-worker]\n    PG[(Postgres)]\n    K[Kafka catalog.published]\n  end\n  subgraph egress\n    Search[catalog-search consumer]\n    OS[(OpenSearch)]\n    WH[Partner webhooks]\n  end\n  Partner --> S3\n  API --> S3\n  S3 --> W\n  W --> PG\n  W --> K\n  K --> Search\n  Search --> OS\n  W --> WH",
+    "mermaidSequence": "sequenceDiagram\n  participant Op as operator\n  participant API as catalog-api\n  participant S3\n  participant W as catalog-worker\n  participant K as Kafka\n  participant S as catalog-search\n  Op->>API: POST /v1/ingest/run\n  API->>S3: stage manifest\n  W->>S3: read feed\n  W->>W: normalize + upsert PG\n  W->>K: catalog.published\n  K->>S: consume\n  S->>S: bulk index OpenSearch\n  W->>Op: webhook delivery status async",
+    "touchpoints": [
+      { "from": "Partners", "to": "S3 bucket catalog-raw", "protocol": "SFTP/S3", "notes": "Per-tenant prefix" },
+      { "from": "catalog-api", "to": "S3", "protocol": "AWS SDK", "notes": "Manual ingest uploads" },
+      { "from": "catalog-worker", "to": "Postgres", "protocol": "SQL", "notes": "Upsert by partner_sku" },
+      { "from": "catalog-worker", "to": "Kafka", "protocol": "binary", "notes": "Partition by tenant_id" },
+      { "from": "catalog-search", "to": "OpenSearch", "protocol": "HTTPS", "notes": "Bulk API" },
+      { "from": "catalog-worker", "to": "Partner HTTPS", "protocol": "webhook", "notes": "HMAC-SHA256" }
+    ]
+  },
+  "agentConsiderations": [
+    {
+      "question": "Synchronous ingest API vs queue-only?",
+      "resolution": "API writes manifest + S3 pointer; worker async per §4.2—API stays under 2s."
+    },
+    {
+      "question": "Dual-write search vs event-driven?",
+      "resolution": "Kafka-only to search; API never touches OpenSearch (prior incident HOT-991)."
+    },
+    {
+      "question": "Split worker MR from API MR?",
+      "resolution": "Three MRs: api #501, worker #502, search #118—merge order enforced in brief."
+    },
+    {
+      "question": "At-least-once Kafka vs exactly-once?",
+      "resolution": "At-least-once + idempotent upsert keys; search consumer uses external versioning."
+    }
+  ],
+  "worthMentioning": [
+    "§6.4 full bi-directional sync deferred—this MR is ingest → publish only.",
+    "DLQ topic `catalog.ingest.dlq` must be monitored before prod flag on.",
+    "OpenSearch reindex NOT required if mapping version unchanged (see migration note).",
+    "Worker MR #502 must deploy before enabling `catalog.sync_v3_enabled`."
+  ],
+  "humanValidation": {
+    "headline": "Treat as a system: confirm three MRs, idempotent ingest, search lag, and webhook signatures—not just catalog-api diff.",
+    "correctSignals": [
+      "Re-running same feed file produces no duplicate sellable rows (unique partner_sku + tenant).",
+      "After publish event, search finds SKU within SLA (staging test ≤5 min).",
+      "Poison message lands in DLQ without blocking partition.",
+      "Webhook retries exponential backoff; signature header documented.",
+      "Feature flag off: legacy ingest path still works."
+    ],
+    "redFlags": [
+      "API writes OpenSearch directly.",
+      "Missing merge order: search consumer deployed before worker emits new schema.",
+      "No DLQ or silent drop on parse errors.",
+      "Raw PII from partner feed logged at INFO.",
+      "Single MR claims all three services without sibling links."
+    ],
+    "quickChecks": [
+      {
+        "action": "Ingest golden feed twice on staging",
+        "passIf": "Row count stable; second run audit log says no-op upserts"
+      },
+      {
+        "action": "Kill search consumer; publish event; restore consumer",
+        "passIf": "Index catches up; no manual reindex"
+      },
+      {
+        "action": "Verify MR links #501 #502 #118 in GitLab",
+        "passIf": "All open or merged per merge order in brief"
+      },
+      {
+        "action": "Traceability vs spec §2–§6",
+        "passIf": "§6.4 deferred marked out_of_scope with ticket CAT-520"
+      }
+    ]
+  },
+  "planBaseline": [
+    "S3 raw + worker normalize",
+    "Kafka publish contract v3",
+    "Search consumer bulk index",
+    "Partner webhooks with HMAC",
+    "Flag-gated cutover"
+  ],
+  "implementationChronicle": [
+    {
+      "seq": 1,
+      "type": "plan",
+      "whatHappened": "Spec §4 requires async worker",
+      "decisionOrConsequence": "API returns 202 ingest job id"
+    },
+    {
+      "seq": 2,
+      "type": "pivot",
+      "whatHappened": "Partner X feed CSV variant discovered in UAT",
+      "decisionOrConsequence": "Adapter registry pattern; not one giant parser"
+    },
+    {
+      "seq": 3,
+      "type": "scope_change",
+      "whatHappened": "§6.4 bidirectional sync slips release",
+      "decisionOrConsequence": "Tracked CAT-520; traceability out_of_scope"
+    },
+    {
+      "seq": 4,
+      "type": "blocker",
+      "whatHappened": "OpenSearch mapping bump needed for nested attrs",
+      "decisionOrConsequence": "search MR #118 includes reindex job—coordinate merge"
+    }
+  ],
+  "deviations": [
+    {
+      "expected": "§6.4 bidirectional sync in v3 launch",
+      "actual": "Ingest → publish only",
+      "reason": "Partner API certification delayed",
+      "acceptableForMerge": true
+    }
+  ],
+  "globalView": [
+    { "capabilityOrLayer": "catalog-api", "roleInMr": "Ingest API + manifest", "notes": "MR #501" },
+    { "capabilityOrLayer": "catalog-worker", "roleInMr": "Normalize + Kafka + webhooks", "notes": "MR #502 sibling" },
+    { "capabilityOrLayer": "catalog-search", "roleInMr": "Consumer + mapping", "notes": "MR #118 sibling" },
+    { "capabilityOrLayer": "Data / S3", "roleInMr": "Lifecycle rules for raw retention", "notes": "30-day expiry" }
+  ],
+  "anchorPoints": [
+    "POST /v1/ingest/run",
+    "topic catalog.published",
+    "migrations/20260927_catalog_items_v3.sql"
+  ],
+  "scope": {
+    "areas": [
+      { "name": "catalog-api", "summary": "Ingest trigger, job status, auth" },
+      { "name": "catalog-worker", "summary": "Parsers, upsert, emit, webhooks" },
+      { "name": "catalog-search", "summary": "Kafka consumer → OpenSearch" },
+      { "name": "Infra", "summary": "S3 bucket policy, DLQ topic, dashboards" }
+    ],
+    "inScope": ["Ingest v3", "Publish events", "Search consistency", "Signed webhooks"],
+    "outOfScope": ["§6.4 bidirectional sync", "Pricing engine", "Storefront UI"],
+    "followUp": ["CAT-520 bidirectional sync", "Dashboard for DLQ depth"]
+  },
+  "requirementsTraceability": [
+    {
+      "criterion": "Scheduled ingest from S3",
+      "sourceRef": "§3.1",
+      "status": "met",
+      "evidence": "Worker cron + manual API trigger share pipeline"
+    },
+    {
+      "criterion": "Idempotent upsert",
+      "sourceRef": "§3.2",
+      "status": "met",
+      "evidence": "Unique (tenant_id, partner_sku); replay tests in worker MR"
+    },
+    {
+      "criterion": "Search within 5 minutes",
+      "sourceRef": "§5.1",
+      "status": "partial",
+      "evidence": "Staging p95 3m; prod SLA pending load test CAT-515"
+    },
+    {
+      "criterion": "Partner publish webhook",
+      "sourceRef": "§4.3",
+      "status": "met",
+      "evidence": "HMAC header + retry policy in worker"
+    },
+    {
+      "criterion": "Bidirectional sync",
+      "sourceRef": "§6.4",
+      "status": "out_of_scope",
+      "evidence": "Explicit defer CAT-520"
+    }
+  ],
+  "behavior": {
+    "before": "Legacy nightly batch ingest v2; search updated by cron SQL.",
+    "after": "Event-driven publish; API v1 ingest; flag selects v2 vs v3 path.",
+    "featureFlags": [
+      { "name": "catalog.sync_v3_enabled", "default": "false", "notes": "tenant allowlist" }
+    ]
+  },
+  "blastRadius": {
+    "usersRoles": "All tenants consuming catalog API and search.",
+    "data": "New catalog_items columns; S3 raw retention; Kafka volume up.",
+    "integrations": "Partners, OpenSearch cluster, webhook endpoints.",
+    "deployNotes": "Order: search consumer → worker → API flag; reindex if mapping rev bumped."
+  },
+  "multiRepo": {
+    "links": [
+      { "repo": "catalog-api", "mr": "#501", "role": "Ingest API (this note)" },
+      { "repo": "catalog-worker", "mr": "#502", "role": "Pipeline + webhooks" },
+      { "repo": "catalog-search", "mr": "#118", "role": "Index consumer" }
+    ],
+    "mergeOrder": "catalog-search #118 → catalog-worker #502 → catalog-api #501 → enable flag per tenant."
+  },
+  "humanAttention": [
+    "Cross-MR contract: Kafka schema version in all three repos.",
+    "DLQ alert routing before any prod tenant on v3.",
+    "S3 bucket policy: partner prefixes isolated.",
+    "Load test CAT-515 gates §5.1 partial → met for GA."
+  ],
+  "deepDives": [
+    {
+      "title": "Why Kafka between worker and search",
+      "body": "Decouples indexing spikes from ingest; replays reindex without re-reading S3. Incident HOT-991 taught us not to dual-write OpenSearch from API."
+    }
+  ],
+  "qualityAgentSummary": {
+    "coveredByAgent": [
+      "S3 IAM least privilege",
+      "Kafka producer idempotence enabled",
+      "3 medium findings on test fixtures (non-blocking)"
+    ],
+    "openFindingsCount": 3,
+    "reviewUrl": "https://gitlab.example.com/commerce/catalog-api/-/merge_requests/501"
+  },
+  "humanChecklist": [
+    "Sibling MRs #502 #118 reviewed or merged per order",
+    "DLQ dashboard linked in runbook",
+    "§6.4 defer acceptable (CAT-520)",
+    "Flag off default in prod",
+    "Staging double-ingest test passed",
+    "Webhook signature doc shared with partners"
+  ],
+  "confidence": { "overall": "medium", "notes": "Integration tier: complex; §5.1 partial until load test" }
+}

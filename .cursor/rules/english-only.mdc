@@ -1,0 +1,10 @@
+---
+description: All Change Brief artifacts, code comments, docs, CLI output, and rendered MR text must be English
+alwaysApply: true
+---
+
+# English only
+
+- **Docs, handoffs, README, prompts, tests, CLI messages, and rendered Change Brief Markdown** → **English**.
+- **Do not** mirror the Jira/spec source language; normalize output to English for reviewers.
+- User-facing chat with the repo owner may stay in their language; **repo deliverables stay English**.

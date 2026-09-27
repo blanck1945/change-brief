@@ -1,0 +1,163 @@
+{
+  "version": "0.4",
+  "status": "ready_for_human",
+  "generatedAt": "2026-09-27T18:00:00.000Z",
+  "chronicleSource": "synthetic",
+  "workSource": {
+    "kind": "jira",
+    "ref": "AUTH-88",
+    "title": "Magic link login with Redis sessions",
+    "url": "https://jira.example/browse/AUTH-88"
+  },
+  "mergeRequest": {
+    "repo": "identity-api",
+    "number": 210,
+    "url": "https://gitlab.example.com/platform/identity-api/-/merge_requests/210",
+    "baseSha": "aaa1111",
+    "headSha": "bbb2222"
+  },
+  "oneLiner": "Users sign in via email magic link; sessions live in Redis with TTL; existing password login unchanged.",
+  "requirementSummary": "AUTH-88 adds passwordless magic link for B2B users: request link by email, one-time token, session cookie, 7-day sliding TTL in Redis—must not break password auth.",
+  "integration": {
+    "summary": "Public API issues signed tokens stored in Postgres `magic_links`, sends email via existing queue, exchange endpoint validates token and writes session to Redis; browser gets HttpOnly cookie.",
+    "mermaid": "flowchart LR\n  User[Browser] --> API[identity-api]\n  API --> PG[(Postgres magic_links)]\n  API --> Q[email queue]\n  API --> Redis[(Redis sessions)]\n  Q --> SES[Email provider]",
+    "mermaidSequence": "sequenceDiagram\n  actor User\n  participant API as identity-api\n  participant PG as Postgres\n  participant Q as email queue\n  participant Redis\n  User->>API: POST /auth/magic-link/request\n  API->>PG: insert token hash\n  API->>Q: enqueue email\n  User->>API: GET /auth/magic-link/consume?token=\n  API->>PG: validate + burn token\n  API->>Redis: SET session\n  API-->>User: Set-Cookie session",
+    "touchpoints": [
+      { "from": "Browser", "to": "identity-api", "protocol": "HTTPS", "notes": "Rate limit on request" },
+      { "from": "identity-api", "to": "Postgres", "protocol": "SQL", "notes": "Token hash only" },
+      { "from": "identity-api", "to": "Redis", "protocol": "RESP", "notes": "Session prefix auth:sess:" },
+      { "from": "identity-api", "to": "email queue", "protocol": "internal", "notes": "Template magic-link-v1" }
+    ]
+  },
+  "agentConsiderations": [
+    {
+      "question": "Store sessions in Postgres instead of Redis?",
+      "resolution": "Redis matches existing session layer for password login; avoids new table migration this sprint."
+    },
+    {
+      "question": "JWT in URL vs opaque token?",
+      "resolution": "Opaque token in DB; link single-use; shorter URL for email clients."
+    },
+    {
+      "question": "Same cookie name as password sessions?",
+      "resolution": "Yes—downstream services unchanged."
+    }
+  ],
+  "worthMentioning": [
+    "Rate limit on magic-link request is 5/hour/email—document in OpenAPI.",
+    "Email template must ship before enabling flag in prod.",
+    "Token TTL 15 minutes; session TTL 7 days sliding."
+  ],
+  "humanValidation": {
+    "headline": "Verify happy path + token reuse blocked + password login still works.",
+    "correctSignals": [
+      "Request link → email enqueued → consume sets cookie → Redis key exists with TTL.",
+      "Second consume with same token returns 410.",
+      "Password login flow unchanged in smoke test.",
+      "Expired token returns 401 with generic message (no user enumeration)."
+    ],
+    "redFlags": [
+      "Plaintext token stored in Postgres.",
+      "Magic link works but password sessions broken (cookie domain/path mismatch).",
+      "No rate limit on request endpoint."
+    ],
+    "quickChecks": [
+      {
+        "action": "End-to-end on staging with mailhog",
+        "passIf": "One email; link works once; session calls /me successfully"
+      },
+      {
+        "action": "Reuse consumed link",
+        "passIf": "410 Gone"
+      },
+      {
+        "action": "Login with password test user",
+        "passIf": "Same session behavior as before MR"
+      }
+    ]
+  },
+  "planBaseline": [
+    "Magic link request + consume endpoints",
+    "Redis session same as password path",
+    "Email via existing queue",
+    "Feature flag auth.magic_link_enabled"
+  ],
+  "implementationChronicle": [
+    {
+      "seq": 1,
+      "type": "discovery",
+      "whatHappened": "Email queue already has auth templates namespace",
+      "decisionOrConsequence": "New template id magic-link-v1"
+    },
+    {
+      "seq": 2,
+      "type": "decision",
+      "whatHappened": "Hash tokens with SHA-256 before persist",
+      "decisionOrConsequence": "DB leak does not expose usable links"
+    }
+  ],
+  "globalView": [
+    { "capabilityOrLayer": "Public auth API", "roleInMr": "Two new routes + OpenAPI", "notes": "" },
+    { "capabilityOrLayer": "Sessions", "roleInMr": "Reuse Redis session writer", "notes": "" },
+    { "capabilityOrLayer": "Notifications", "roleInMr": "Enqueue magic link email", "notes": "" }
+  ],
+  "scope": {
+    "areas": [
+      { "name": "API /auth", "summary": "request + consume magic link" },
+      { "name": "Data", "summary": "magic_links table + index on token_hash" },
+      { "name": "Redis", "summary": "No schema change; same key pattern" }
+    ],
+    "inScope": ["Magic link login", "Session cookie", "Rate limits"],
+    "outOfScope": ["SSO SAML", "SMS OTP", "Admin impersonation"]
+  },
+  "requirementsTraceability": [
+    {
+      "criterion": "User can request magic link by email",
+      "sourceRef": "AC1",
+      "status": "met",
+      "evidence": "POST validates user exists; always 202 to avoid enumeration"
+    },
+    {
+      "criterion": "Link works once and creates session",
+      "sourceRef": "AC2",
+      "status": "met",
+      "evidence": "Consume burns row; Redis session created"
+    },
+    {
+      "criterion": "Password login still supported",
+      "sourceRef": "AC3",
+      "status": "met",
+      "evidence": "No changes to password grant handler"
+    }
+  ],
+  "behavior": {
+    "before": "Password + API keys only.",
+    "after": "Optional magic link when flag on; same session cookie semantics.",
+    "featureFlags": [
+      { "name": "auth.magic_link_enabled", "default": "false", "notes": "per environment" }
+    ]
+  },
+  "blastRadius": {
+    "usersRoles": "B2B users with email on file.",
+    "data": "New table; Redis session volume increase.",
+    "integrations": "Email queue + Redis; no new external SaaS.",
+    "deployNotes": "Run migration before API; enable flag after template deploy."
+  },
+  "humanAttention": [
+    "Confirm 202-on-unknown-email policy with security.",
+    "Cookie SameSite settings for magic link landing page."
+  ],
+  "qualityAgentSummary": {
+    "coveredByAgent": ["Token hashing", "Rate limit middleware present", "SQL parameterized"],
+    "openFindingsCount": 1,
+    "reviewUrl": "https://gitlab.example.com/platform/identity-api/-/merge_requests/210"
+  },
+  "humanChecklist": [
+    "Migration applied on staging",
+    "Mail template live",
+    "Flag off in prod until QA sign-off",
+    "Password smoke test passed",
+    "Traceability matches AUTH-88 ACs"
+  ],
+  "confidence": { "overall": "high", "notes": "Integration tier: medium" }
+}

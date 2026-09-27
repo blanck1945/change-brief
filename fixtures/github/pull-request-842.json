@@ -1,0 +1,10 @@
+{
+  "repo": "billing-api",
+  "number": 842,
+  "url": "https://github.com/example/billing-api/pull/842",
+  "title": "PROJ-1234: plan downgrade with proration",
+  "body": "Implements backend for PROJ-1234. Portal UI tracked in PROJ-1290.",
+  "baseSha": "a1b2c3d",
+  "headSha": "f4e5d6c",
+  "labels": ["jira:PROJ-1234"]
+}

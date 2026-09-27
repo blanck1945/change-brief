@@ -1,0 +1,24 @@
+{
+  "key": "PROJ-1234",
+  "url": "https://jira.example/browse/PROJ-1234",
+  "summary": "Allow plan downgrade with proration",
+  "description": "Pro customers need self-service downgrade to Starter with prorated account credit applied at cycle end.",
+  "acceptanceCriteria": [
+    {
+      "id": "AC1",
+      "text": "Pro user can request downgrade via self-service API"
+    },
+    {
+      "id": "AC2",
+      "text": "System computes prorated credit for unused portion of cycle"
+    },
+    {
+      "id": "AC3",
+      "text": "Downgrade takes effect at billing cycle end, not immediately"
+    },
+    {
+      "id": "AC4",
+      "text": "Portal UI shows downgrade flow and credit preview"
+    }
+  ]
+}

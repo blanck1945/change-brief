@@ -1,0 +1,121 @@
+{
+  "version": "0.4",
+  "status": "ready_for_human",
+  "generatedAt": "2026-09-27T18:00:00.000Z",
+  "chronicleSource": "synthetic",
+  "workSource": {
+    "kind": "jira",
+    "ref": "OPS-12",
+    "title": "Post deploy summary to Slack",
+    "url": "https://jira.example/browse/OPS-12"
+  },
+  "mergeRequest": {
+    "repo": "platform-api",
+    "number": 44,
+    "url": "https://gitlab.example.com/platform/platform-api/-/merge_requests/44",
+    "baseSha": "1111aaa",
+    "headSha": "2222bbb"
+  },
+  "oneLiner": "After a successful production deploy, the API sends one formatted summary message to the team Slack webhook.",
+  "requirementSummary": "OPS-12: when deploy pipeline marks production green, notify #deploys in Slack with service name, version, and deployer—no retries UI, no PagerDuty.",
+  "integration": {
+    "summary": "Deploy hook handler reads `SLACK_DEPLOY_WEBHOOK_URL` from env, builds a JSON payload, and POSTs once on `deploy.succeeded` events from the internal bus.",
+    "mermaid": "flowchart LR\n  Bus[deploy.succeeded event] --> Handler[DeployNotifyHandler]\n  Handler --> Slack[Slack incoming webhook]",
+    "mermaidSequence": "sequenceDiagram\n  participant CI as deploy pipeline\n  participant API as platform-api\n  participant Slack\n  CI->>API: POST /internal/hooks/deploy\n  API->>Slack: POST webhook JSON\n  Slack-->>API: 200 ok",
+    "touchpoints": [
+      { "from": "CI / deploy pipeline", "to": "POST /internal/hooks/deploy", "protocol": "HTTPS", "notes": "Shared secret header" },
+      { "from": "platform-api", "to": "Slack webhook", "protocol": "HTTPS", "notes": "Timeout 5s; log failures only" }
+    ]
+  },
+  "agentConsiderations": [
+    {
+      "question": "Use Slack SDK vs raw webhook?",
+      "resolution": "Incoming webhook only—no OAuth bot; matches ticket scope."
+    },
+    {
+      "question": "Retry failed Slack POST?",
+      "resolution": "Single attempt; deploy already succeeded; ops reads logs if needed."
+    }
+  ],
+  "worthMentioning": [
+    "Webhook URL is secret—must live in env/secrets manager, not git.",
+    "Handler is fire-and-forget; does not block deploy pipeline response."
+  ],
+  "humanValidation": {
+    "headline": "Confirm one Slack message per successful prod deploy and no secret in repo.",
+    "correctSignals": [
+      "Staging deploy with test webhook receives exactly one message with version + actor.",
+      "Missing webhook URL: handler logs warning, hook returns 204 (deploy not failed).",
+      "Invalid shared secret on hook returns 401."
+    ],
+    "redFlags": [
+      "Webhook URL committed in config files.",
+      "Slack errors bubble up as 500 to CI (blocks deploy).",
+      "Multiple messages per single deploy event."
+    ],
+    "quickChecks": [
+      {
+        "action": "Trigger mock deploy.succeeded on staging",
+        "passIf": "One Slack message; CI hook returns 2xx"
+      },
+      {
+        "action": "Unset SLACK_DEPLOY_WEBHOOK_URL",
+        "passIf": "No crash; warn log; CI still 2xx"
+      }
+    ]
+  },
+  "planBaseline": [
+    "Listen for deploy.succeeded",
+    "POST Slack incoming webhook",
+    "Env-based URL + shared secret on hook"
+  ],
+  "implementationChronicle": [
+    {
+      "seq": 1,
+      "type": "plan",
+      "whatHappened": "Reuse existing internal hooks router",
+      "decisionOrConsequence": "New handler module only; no new service"
+    }
+  ],
+  "scope": {
+    "areas": [
+      { "name": "Internal hooks", "summary": "Register deploy.succeeded consumer" },
+      { "name": "Slack client", "summary": "Thin POST helper with timeout" }
+    ],
+    "inScope": ["Slack notify on prod deploy success"],
+    "outOfScope": ["Failed deploy alerts", "Retry dashboard", "MS Teams"]
+  },
+  "requirementsTraceability": [
+    {
+      "criterion": "Notify #deploys on prod success",
+      "sourceRef": "AC1",
+      "status": "met",
+      "evidence": "Handler formats channel message and POSTs webhook on prod-only flag"
+    },
+    {
+      "criterion": "Include version and deployer",
+      "sourceRef": "AC2",
+      "status": "met",
+      "evidence": "Payload fields from event metadata"
+    }
+  ],
+  "behavior": {
+    "before": "Deploy success silent; team checks CI manually.",
+    "after": "Prod deploy success triggers optional Slack post when webhook configured."
+  },
+  "humanAttention": [
+    "Confirm prod-only gating matches your pipeline labels.",
+    "Rotate webhook if it ever leaked in logs."
+  ],
+  "qualityAgentSummary": {
+    "coveredByAgent": ["Secret scan: no webhook in diff", "HTTP timeout set"],
+    "openFindingsCount": 0
+  },
+  "humanChecklist": [
+    "Webhook URL only in secrets",
+    "Staging test message looks correct",
+    "Failure to Slack does not fail deploy",
+    "AC1–AC2 evidence matches what I expect"
+  ],
+  "confidence": { "overall": "high", "notes": "Integration tier: simple" }
+}

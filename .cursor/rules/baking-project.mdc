@@ -1,0 +1,37 @@
+---
+description: Baking-AI mandatory in this repo — agents must use Baking for all implementation
+alwaysApply: true
+---
+
+# Baking required (this project)
+
+Marker: **`.cursor/baking/required.json`** (`bakingRequired: true`, `strict: true`).
+
+## Non‑negotiable
+
+1. **Before any file edit or shell that changes the repo** — classify Step 0 (`ROUTER.md`). You must open with a Baking tier banner (`⬜ gate-out` · `⚡ DIRECT` · `🩵/🟣/… → subagent`). **Silent inline edits are forbidden.**
+2. **Implementation** → **ROUTER + handoff** (`.cursor/handoff/`) + close YAML + **`runs.jsonl` metrics**.
+3. **If you already edited without Baking** → stop, say so, revert or redo under Baking.
+4. **When in doubt** → **delegate** (planner/executor), not gate-out.
+
+## No DIRECT (`noDirect: true` / `dogfood: true`)
+
+- **Do not** use DIRECT for product work.
+- **planner → handoff → executor-cursor** / **executor**.
+
+## Always use Baking (`alwaysUseBaking: true`)
+
+When set ( **baking-ai home repo** by default):
+
+- The **orchestrator must not** edit product code — only delegate.
+- Every product change run: visible **PLAN** (or SPEC-REFINE) + **EXECUTE** subagent + metrics.
+
+See **`DOGFOOD.md`** in the Baking repo.
+
+## Gate-out (narrow)
+
+Read-only Q&A, no repo edits requested.
+
+## References
+
+`ROUTER.md`, `BAKING-CURSOR.md`, `RECORD-KEEPING.md`, `DOGFOOD.md`

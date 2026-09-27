@@ -1,0 +1,3 @@
+{"seq":1,"ts":"2026-09-23T10:00:00Z","type":"plan","whatHappened":"Started from PROJ-1234 / spec §3","decisionOrConsequence":"Backend-only MR; portal deferred","actor":"agent"}
+{"seq":2,"ts":"2026-09-23T14:30:00Z","type":"discovery","whatHappened":"Stripe Schedule insufficient for ledger credit","decisionOrConsequence":"Use subscription_scheduled_changes table","actor":"agent"}
+{"seq":3,"ts":"2026-09-24T09:00:00Z","type":"decision","whatHappened":"Feature flag default false","decisionOrConsequence":"Ops enables billing.downgrade_self_service per env","actor":"human"}

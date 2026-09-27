@@ -1,0 +1,7 @@
+node_modules/
+fixtures/output/
+examples/mock-workspace/preview/output/
+examples/integration-tiers/output/
+examples/integration-tiers/*/change-brief.md
+examples/preview-all/output/
+.cursor/baking/metrics/

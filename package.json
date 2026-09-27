@@ -1,0 +1,30 @@
+{
+  "name": "change-brief",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test",
+    "change-brief": "tsx src/cli/change-brief.ts",
+    "mock:github": "tsx src/cli/change-brief.ts mock-github",
+    "demo": "tsx examples/mock-workspace/run-demo.ts",
+    "preview": "tsx examples/mock-workspace/preview/run-preview.ts",
+    "preview:tiers": "tsx examples/integration-tiers/run-tiers.ts",
+    "preview:all": "tsx examples/preview-all/run-all.ts"
+  },
+  "bin": {
+    "change-brief": "./src/cli/change-brief.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1",
+    "marked": "^15.0.12"
+  }
+}
